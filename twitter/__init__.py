@@ -29,7 +29,7 @@ except ImportError:
     from md5 import md5
 
 from _file_cache import _FileCache
-from error import TwitterError
+from error import TwitterError, TwitterRateLimitedError
 from direct_message import DirectMessage
 from hashtag import Hashtag
 from parse_tweet import ParseTweet

@@ -35,7 +35,8 @@ from requests_oauthlib import OAuth1
 import StringIO
 
 from twitter import (__version__, _FileCache, json, DirectMessage, List,
-                     Status, Trend, TwitterError, User, UserStatus)
+                     Status, Trend, TwitterError, TwitterRateLimitedError,
+                     User, UserStatus)
 
 CHARACTER_LIMIT = 140
 
@@ -1433,7 +1434,9 @@ class Api(object):
             When True, the user entities will be included. [Optional]
     
         Returns:
-          A sequence of twitter.User instances, one for each friend
+          result - A sequence of twitter.User instances, one for each friend;
+          cursor - The first cursor that wasn't fetched due to throttling (or None if wasn't throttled)
+          was_throttled - Boolean, expected to be True iff 'cursor' is not None
         """
         if not self.__auth:
             raise TwitterError({'message': "twitter.Api instance must be authenticated"})
@@ -1455,22 +1458,27 @@ class Api(object):
         if include_user_entities:
             parameters['include_user_entities'] = True
 
-        while True:
-            parameters['cursor'] = cursor
-            json_data = self._RequestUrl(url, 'GET', data=parameters)
-            data = self._ParseAndCheckTwitter(json_data.content)
-            result += [User.NewFromJsonDict(x) for x in data['users']]
-            if 'next_cursor' in data:
-                if data['next_cursor'] == 0 or data['next_cursor'] == data['previous_cursor']:
-                    break
+        was_throttled = False
+        try:
+            while True:
+                parameters['cursor'] = cursor
+                json_data = self._RequestUrl(url, 'GET', data=parameters)
+                data = self._ParseAndCheckTwitter(json_data.content)
+                result += [User.NewFromJsonDict(x) for x in data['users']]
+                if 'next_cursor' in data:
+                    if data['next_cursor'] == 0 or data['next_cursor'] == data['previous_cursor']:
+                        break
+                    else:
+                        cursor = data['next_cursor']
                 else:
-                    cursor = data['next_cursor']
-            else:
-                break
-            sec = self.GetSleepTime('/friends/list')
-            time.sleep(sec)
+                    break
+                sec = self.GetSleepTime('/friends/list')
+                time.sleep(sec)
+            cursor = None
+        except TwitterRateLimitedError:
+            was_throttled = True
 
-        return result
+        return result, cursor, was_throttled
 
     def GetFriendIDs(self,
                      user_id=None,
@@ -3756,6 +3764,8 @@ class Api(object):
         if 'error' in data:
             raise TwitterError(data['error'])
         if 'errors' in data:
+            if any(('code' in error and error['code'] == 88) for error in data['errors']):
+                raise TwitterRateLimitedError(data['errors'])
             raise TwitterError(data['errors'])
 
     def _RequestUrl(self, url, verb, data=None):
