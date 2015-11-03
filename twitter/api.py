@@ -1472,6 +1472,9 @@ class Api(object):
                         cursor = data['next_cursor']
                 else:
                     break
+                remaining = json_data.headers.get('x-rate-limit-remaining')
+                if remaining is not None and remaining == 0 or remaining == '0':
+                    raise TwitterRateLimitedError()
                 sec = self.GetSleepTime('/friends/list')
                 time.sleep(sec)
             cursor = None
